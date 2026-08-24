@@ -48,6 +48,11 @@ from ...kodion.items import AudioItem, UriItem, VideoItem
 from ...kodion.network import get_connect_address
 from ...kodion.utils.datetime import datetime_to_since
 from ...kodion.utils.redact import redact_params
+from ...kodion.utils.tempo import (
+    arm_speed_keys,
+    disarm_speed_keys,
+    tempo_supports_video,
+)
 
 
 def _play_stream(provider, context):
@@ -160,6 +165,18 @@ def _play_stream(provider, context):
         uri=stream['url'],
         video_id=video_id,
     )
+
+    # Arm inputstream.tempo's speed keys while it owns the stream, and make
+    # sure they are inert when it does not. Its keymap binds FullscreenVideo
+    # as well as the music windows and has no guard beyond this sentinel, so
+    # one left behind would capture Page Up/Page Down during ordinary
+    # playback. PlayerMonitor.onPlayBackEnded disarms them again at the end.
+    if audio_only or not video_type:
+        arm_speed_keys(settings.audio_only_tempo())
+    elif settings.video_tempo_enabled() and tempo_supports_video():
+        arm_speed_keys(settings.video_tempo())
+    else:
+        disarm_speed_keys()
 
     use_history = not (screensaver or incognito or stream.get('live'))
     use_remote_history = use_history and settings.use_remote_history()

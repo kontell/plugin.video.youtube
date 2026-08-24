@@ -28,6 +28,7 @@ from ..constants import (
 )
 from ..utils.redact import redact_params
 from ..utils.convert_format import channel_filter_split
+from ..utils.tempo import disarm_speed_keys
 
 
 class PlayerMonitorThread(object):
@@ -471,6 +472,11 @@ class PlayerMonitor(xbmc.Player):
 
         ui.pop_property(PLAY_USING)
         ui.clear_property(TRAKT_PAUSE_FLAG, raw=True)
+
+        # inputstream.tempo's keymap stays live for as long as its sentinel
+        # exists, so the speed keys have to be given back at the end of
+        # playback rather than only when the next item declines them.
+        disarm_speed_keys()
 
         self.stop_threads()
         self.cleanup_threads()

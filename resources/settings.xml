@@ -209,6 +209,56 @@
                     </dependencies>
                     <control type="toggle"/>
                 </setting>
+                <setting id="kodion.audio_only.tempo" type="number" label="30825" help="">
+                    <level>0</level>
+                    <default>1.0</default>
+                    <constraints>
+                        <minimum>0.50</minimum>
+                        <step>0.05</step>
+                        <maximum>5.0</maximum>
+                    </constraints>
+                    <control type="slider" format="number">
+                        <format>{:.2f}x</format>
+                    </control>
+                </setting>
+                <setting id="kodion.audio_only.paplayer" type="boolean" label="30826" help="30827">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="kodion.video.tempo.enabled" type="boolean" label="30828" help="30829">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable">
+                            <and>
+                                <condition name="InfoBool" on="property">System.HasAddon(inputstream.tempo)</condition>
+                                <condition setting="kodion.video.quality.isa" operator="is">false</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="kodion.video.tempo" type="number" parent="kodion.video.tempo.enabled" label="30830" help="30831">
+                    <level>0</level>
+                    <default>1.0</default>
+                    <constraints>
+                        <minimum>0.50</minimum>
+                        <step>0.05</step>
+                        <maximum>5.0</maximum>
+                    </constraints>
+                    <dependencies>
+                        <dependency type="enable">
+                            <and>
+                                <condition setting="kodion.video.quality.isa" operator="is">false</condition>
+                                <condition setting="kodion.video.tempo.enabled" operator="is">true</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
+                    <control type="slider" format="number">
+                        <format>{:.2f}x</format>
+                    </control>
+                </setting>
                 <setting id="kodion.subtitle.configure" type="action" label="287" help="">
                     <level>0</level>
                     <constraints>

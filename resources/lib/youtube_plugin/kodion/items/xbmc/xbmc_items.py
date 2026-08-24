@@ -37,7 +37,34 @@ from ...constants import (
     VIDEO_ID,
 )
 from ...utils.datetime import datetime_to_since, utc_to_local
+from ...utils.methods import get_kodi_setting_value
 from ...utils.system_version import current_system_version
+from ...utils.tempo import TEMPO_FILE, tempo_supports_video
+
+
+_tempo_queue_secs = None
+
+
+def get_tempo_queue_secs():
+    """Depth of Kodi's demux queues, in seconds.
+
+    inputstream.tempo reports playback time this far behind its own demux
+    head, so it needs the real depth to place the OSD at the point that is
+    actually playing. Kodi v21 hard-codes 8s; Kodi v22 exposes it as
+    videoplayer.queuetimesize, in deciseconds.
+    """
+    global _tempo_queue_secs
+    if _tempo_queue_secs is not None:
+        return _tempo_queue_secs
+
+    queue_secs = 8.0
+    if current_system_version.compatible(22):
+        value = get_kodi_setting_value('videoplayer.queuetimesize',
+                                       process=float)
+        queue_secs = (value / 10) if value else 4.0
+
+    _tempo_queue_secs = queue_secs
+    return queue_secs
 
 
 def set_info(list_item, item, properties, set_play_count=True, resume=True):
@@ -523,6 +550,45 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
         if 'mime=' in uri:
             mime_type = uri.split('mime=', 1)[1].split('&', 1)[0]
             mime_type = mime_type.replace('%2F', '/')
+
+        # Route playback through inputstream.tempo for pitch-corrected speed
+        # control. Only reachable when inputstream.adaptive is not handling
+        # the item, so the stream is progressive and the inputstream slot is
+        # free for tempo to take. The add-on reads the mime type off the
+        # ListItem, set below, not from a property.
+        audio_only = isinstance(media_item, AudioItem)
+        if audio_only:
+            # Any version of the add-on can shift an audio-only stream.
+            use_tempo = context.addon_enabled('inputstream.tempo')
+        else:
+            use_tempo = (settings.video_tempo_enabled()
+                         and tempo_supports_video())
+
+        if use_tempo:
+            tempo = (settings.audio_only_tempo() if audio_only else
+                     settings.video_tempo())
+            props['inputstream'] = 'inputstream.tempo'
+            if tempo != 1.0:
+                props['inputstream.tempo.tempo'] = str(tempo)
+            props['inputstream.tempo.tempo_file'] = TEMPO_FILE
+
+            if audio_only:
+                # Kodi's CPlayerCoreFactory::GetPlayers honours the
+                # 'inputstream-player' property on items that declare an
+                # inputstream add-on - 'audiodefaultplayer' routes through
+                # PAPlayer (content-time OSD, lighter pipeline) instead of
+                # VideoPlayer (wall-clock OSD, video renderer).
+                if settings.audio_only_paplayer():
+                    props['inputstream-player'] = 'audiodefaultplayer'
+            else:
+                # Video runs under VideoPlayer, which reads time from the
+                # demux head; tempo needs the queue depth to report the point
+                # that is actually playing. start_time is audio-only - it
+                # holds output back for PAPlayer's bookmark seek, and
+                # VideoPlayer seeks before any output starts.
+                props['inputstream.tempo.queue_secs'] = str(
+                    get_tempo_queue_secs()
+                )
 
         headers = media_item.get_headers(as_string=True)
         if (headers and uri.startswith('http')

@@ -36,6 +36,12 @@ class SettingsProxy(object):
         def set_int(self, *args, **kwargs):
             return self.ref.setInt(*args, **kwargs)
 
+        def get_num(self, *args, **kwargs):
+            return self.ref.getNumber(*args, **kwargs)
+
+        def set_num(self, *args, **kwargs):
+            return self.ref.setNumber(*args, **kwargs)
+
         def get_str(self, *args, **kwargs):
             return self.ref.getString(*args, **kwargs)
 
@@ -60,6 +66,12 @@ class SettingsProxy(object):
 
         def set_int(self, *args, **kwargs):
             return self.ref.setSettingInt(*args, **kwargs)
+
+        def get_num(self, *args, **kwargs):
+            return self.ref.getSettingNumber(*args, **kwargs)
+
+        def set_num(self, *args, **kwargs):
+            return self.ref.setSettingNumber(*args, **kwargs)
 
         def get_str(self, *args, **kwargs):
             return self.ref.getSettingString(*args, **kwargs)
@@ -210,6 +222,37 @@ class XbmcPluginSettings(AbstractSettings):
         if echo_level and self._echo_level:
             self.log.debug_trace('Get setting {name!r}:'
                                  ' {value!r} (int, {state})',
+                                 name=setting,
+                                 value=value,
+                                 state=(error if error else 'success'),
+                                 stacklevel=echo_level)
+        self._cache[setting] = value
+        return value
+
+    def get_float(self, setting, default=-1.0, process=None, echo_level=2):
+        if setting in self._cache:
+            return self._cache[setting]
+
+        error = False
+        try:
+            value = float(self._proxy.get_num(setting))
+            if process:
+                value = process(value)
+        except (TypeError, ValueError) as exc:
+            error = exc
+            try:
+                value = self.get_string(setting, echo_level=0)
+                value = float(value)
+            except (TypeError, ValueError) as exc:
+                error = exc
+                value = default
+        except RuntimeError as exc:
+            error = exc
+            value = default
+
+        if echo_level and self._echo_level:
+            self.log.debug_trace('Get setting {name!r}:'
+                                 ' {value!r} (float, {state})',
                                  name=setting,
                                  value=value,
                                  state=(error if error else 'success'),

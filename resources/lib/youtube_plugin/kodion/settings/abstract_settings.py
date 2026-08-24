@@ -51,6 +51,9 @@ class AbstractSettings(object):
     def set_int(self, setting, value, echo_level=2):
         raise NotImplementedError()
 
+    def get_float(self, setting, default=-1.0, process=None, echo_level=2):
+        raise NotImplementedError()
+
     def get_string(self, setting, default='', echo_level=2):
         raise NotImplementedError()
 
@@ -174,6 +177,29 @@ class AbstractSettings(object):
         if self.ask_for_video_quality():
             return False
         return self.get_bool(SETTINGS.AUDIO_ONLY, False)
+
+    def _tempo_rate(self, setting):
+        # These are 'number' settings - reading one as a string raises
+        # 'Invalid setting type', which would be swallowed and silently
+        # leave every rate at 1.0.
+        return self.get_float(setting, 1.0)
+
+    def audio_only_tempo(self):
+        return self._tempo_rate(SETTINGS.AUDIO_ONLY_TEMPO)
+
+    def audio_only_paplayer(self):
+        return self.get_bool(SETTINGS.AUDIO_ONLY_PAPLAYER, True)
+
+    def video_tempo_enabled(self):
+        # inputstream.adaptive occupies the inputstream slot whenever it
+        # handles the item, so tempo can only take video off the progressive
+        # streams used when ISA is off.
+        if self.use_isa():
+            return False
+        return self.get_bool(SETTINGS.VIDEO_TEMPO_ENABLED, False)
+
+    def video_tempo(self):
+        return self._tempo_rate(SETTINGS.VIDEO_TEMPO)
 
     def get_subtitle_selection(self):
         return self.get_int(SETTINGS.SUBTITLE_SELECTION, 0)

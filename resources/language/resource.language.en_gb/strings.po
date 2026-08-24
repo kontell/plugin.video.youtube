@@ -1604,3 +1604,31 @@ msgstr ""
 msgctxt "#30824"
 msgid "Filter by channel names separated by a comma eg. 'The Best Channel,The 2nd Best Channel'"
 msgstr ""
+
+msgctxt "#30825"
+msgid "Audio only playback speed"
+msgstr ""
+
+msgctxt "#30826"
+msgid "Route audio-only through PAPlayer"
+msgstr ""
+
+msgctxt "#30827"
+msgid "When audio-only playback is active, route the stream through Kodi's music player (PAPlayer) instead of VideoPlayer. PAPlayer is lighter and its OSD reflects pitch-corrected content time rather than wall-clock time at non-1× tempo. Requires inputstream.tempo."
+msgstr ""
+
+msgctxt "#30828"
+msgid "Use playback speed for video"
+msgstr ""
+
+msgctxt "#30829"
+msgid "Route video playback through inputstream.tempo, which rate-shifts video and subtitles in step with pitch-corrected audio. Only available while adaptive streaming (DASH) is off, as inputstream.adaptive otherwise handles the stream. Audio passthrough is disabled for the item. Requires inputstream.tempo."
+msgstr ""
+
+msgctxt "#30830"
+msgid "Video playback speed"
+msgstr ""
+
+msgctxt "#30831"
+msgid "Speed video playback starts at. Page Up and Page Down change it during playback, and '=' returns to 1.00x."
+msgstr ""
