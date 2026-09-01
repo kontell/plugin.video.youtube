@@ -259,6 +259,24 @@
                         <format>{:.2f}x</format>
                     </control>
                 </setting>
+                <setting id="kodion.syncplay.enabled" type="boolean" label="30832" help="30833">
+                    <level>0</level>
+                    <default>true</default>
+                    <control type="toggle"/>
+                </setting>
+                <setting id="kodion.syncplay.progressive" type="boolean" parent="kodion.syncplay.enabled" label="30834" help="30835">
+                    <level>0</level>
+                    <default>false</default>
+                    <dependencies>
+                        <dependency type="enable">
+                            <and>
+                                <condition name="InfoBool" on="property">System.HasAddon(inputstream.tempo)</condition>
+                                <condition setting="kodion.syncplay.enabled" operator="is">true</condition>
+                            </and>
+                        </dependency>
+                    </dependencies>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="kodion.subtitle.configure" type="action" label="287" help="">
                     <level>0</level>
                     <constraints>

@@ -46,6 +46,7 @@ from ...kodion.constants import (
 )
 from ...kodion.items import AudioItem, UriItem, VideoItem
 from ...kodion.network import get_connect_address
+from ...kodion.utils import syncplay
 from ...kodion.utils.datetime import datetime_to_since
 from ...kodion.utils.redact import redact_params
 from ...kodion.utils.tempo import (
@@ -70,6 +71,14 @@ def _play_stream(provider, context):
     incognito = params.get(INCOGNITO, False)
     screensaver = params.get(SCREENSAVER, False)
 
+    # Read the SyncPlay session once, so every decision below - which streams
+    # to resolve, whether the speed keys are the viewer's, what the claim says
+    # - is made against one answer rather than a property that could change
+    # between them.
+    use_syncplay = settings.syncplay_enabled() and not screensaver
+    sync_state = syncplay.session_state() if use_syncplay else {}
+    sync_in_group = syncplay.in_group(sync_state)
+
     audio_only = False
     is_external = ui.get_property(PLAY_USING, as_bool=True)
     if ((is_external and settings.alternative_player_web_urls())
@@ -91,6 +100,20 @@ def _play_stream(provider, context):
         elif audio_only is None:
             audio_only = not ask_for_quality and settings.audio_only()
 
+        # Fine sync needs inputstream.tempo to hold the item's one
+        # inputstream slot, which it can only do on a progressive stream -
+        # inputstream.adaptive takes that slot whenever it handles the item.
+        # So the group member who wants tens-of-milliseconds convergence
+        # trades DASH for it, and says so with a setting.
+        force_progressive = (sync_in_group
+                             and not audio_only
+                             and settings.syncplay_progressive()
+                             and tempo_supports_video())
+
+        # Left alone deliberately, even when forcing progressive: the MPD it
+        # generates goes unused, but a video with no progressive rendition
+        # then still has a DASH stream to fall back to below. _select_stream
+        # is the single place that decides what the item ends up being.
         use_mpd = ((not is_external or settings.alternative_player_mpd())
                    and settings.use_mpd_videos()
                    and context.ipc_exec(SERVER_WAKEUP, timeout=5))
@@ -132,7 +155,24 @@ def _play_stream(provider, context):
             ask_for_quality=ask_for_quality,
             audio_only=audio_only,
             use_mpd=use_mpd,
+            force_progressive=force_progressive,
         )
+
+        if stream is None and force_progressive:
+            # A live stream has no progressive rendition at all, so forcing
+            # one leaves nothing to select. Fine sync is not worth failing
+            # playback over - fall back and let the group hold this member
+            # with commands alone.
+            logging.debug('SyncPlay: no progressive stream; adaptive fallback')
+            force_progressive = False
+            stream = _select_stream(
+                context,
+                streams,
+                ask_for_quality=ask_for_quality,
+                audio_only=audio_only,
+                use_mpd=use_mpd,
+            )
+
         if stream is None:
             return False
 
@@ -166,18 +206,6 @@ def _play_stream(provider, context):
         video_id=video_id,
     )
 
-    # Arm inputstream.tempo's speed keys while it owns the stream, and make
-    # sure they are inert when it does not. Its keymap binds FullscreenVideo
-    # as well as the music windows and has no guard beyond this sentinel, so
-    # one left behind would capture Page Up/Page Down during ordinary
-    # playback. PlayerMonitor.onPlayBackEnded disarms them again at the end.
-    if audio_only or not video_type:
-        arm_speed_keys(settings.audio_only_tempo())
-    elif settings.video_tempo_enabled() and tempo_supports_video():
-        arm_speed_keys(settings.video_tempo())
-    else:
-        disarm_speed_keys()
-
     use_history = not (screensaver or incognito or stream.get('live'))
     use_remote_history = use_history and settings.use_remote_history()
     use_local_history = use_history and settings.use_local_history()
@@ -185,6 +213,48 @@ def _play_stream(provider, context):
     utils.update_play_info(
         provider, context, video_id, media_item, stream, yt_item
     )
+
+    # Tell the SyncPlay engine what this add-on just put on screen. Without a
+    # claim it cannot tell a member's own playback from the group's, so it
+    # demotes them to spectator - which is the right default for an add-on
+    # that has not opted in, and the thing this call exists to stop.
+    #
+    # The fine-sync route rides along only when the item really was resolved
+    # progressive: update_play_info clears use_isa for a non-adaptive stream,
+    # and that - not what was asked for above - is what decides whether the
+    # inputstream slot is free for tempo to take.
+    sync_route = None
+    if use_syncplay:
+        if (sync_in_group
+                and not audio_only
+                and video_type
+                and not media_item.use_isa()
+                and tempo_supports_video()):
+            sync_route = syncplay.tempo_route()
+        if sync_route:
+            media_item.set_sync_tempo_route(sync_route)
+        syncplay.claim(video_id,
+                       name=metadata.get('title', ''),
+                       duration=media_item.get_duration(),
+                       tempo=sync_route)
+
+    # Arm inputstream.tempo's speed keys while it owns the stream, and make
+    # sure they are inert when it does not. Its keymap binds FullscreenVideo
+    # as well as the music windows and has no guard beyond this sentinel, so
+    # one left behind would capture Page Up/Page Down during ordinary
+    # playback. PlayerMonitor.onPlayBackEnded disarms them again at the end.
+    if sync_route:
+        # The rate belongs to the engine for as long as it is converging this
+        # stream, so the viewer does not get the keys: a press would pull
+        # this member off the group, and the engine would spend the rest of
+        # the session pulling it back.
+        disarm_speed_keys()
+    elif audio_only or not video_type:
+        arm_speed_keys(settings.audio_only_tempo())
+    elif settings.video_tempo_enabled() and tempo_supports_video():
+        arm_speed_keys(settings.video_tempo())
+    else:
+        disarm_speed_keys()
 
     seek_time = 0.0 if params.get('resume') else params.get('seek', 0.0)
     start_time = params.get('start', 0.0)
@@ -354,9 +424,20 @@ def _select_stream(context,
                    stream_data_list,
                    ask_for_quality,
                    audio_only,
-                   use_mpd=True):
+                   use_mpd=True,
+                   force_progressive=False):
     settings = context.get_settings()
-    if settings.use_isa():
+    if force_progressive:
+        # Reproduce the ISA-off path for one playback, without touching the
+        # global setting. Clearing use_mpd alone is not enough: with ISA
+        # enabled the adaptive HLS entries stay in the list below and sort
+        # above every progressive one, so the item would come back adaptive
+        # and inputstream.tempo would find its slot already taken.
+        use_mpd = False
+        use_adaptive = False
+        use_live_adaptive = False
+        use_live_mpd = False
+    elif settings.use_isa():
         isa_capabilities = context.inputstream_adaptive_capabilities()
         use_adaptive = bool(isa_capabilities)
         use_live_adaptive = use_adaptive and 'live' in isa_capabilities

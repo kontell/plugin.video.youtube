@@ -66,6 +66,7 @@ class MediaItem(BaseItem):
         self._headers = None
         self._license_key = None
         self._uses_isa = None
+        self._sync_tempo_route = None
         self.subtitles = None
 
         self._completed = False
@@ -276,6 +277,17 @@ class MediaItem(BaseItem):
 
     def use_isa(self):
         return self._uses_isa
+
+    def set_sync_tempo_route(self, route):
+        # A SyncPlay engine's fine-sync route for this item, decided once
+        # where playback is resolved and consumed where the ListItem is
+        # built. Carried on the item rather than re-derived in both places,
+        # which is how the two would come to disagree about whether the
+        # stream was tempo-routed after the claim had already said it was.
+        self._sync_tempo_route = route
+
+    def sync_tempo_route(self):
+        return self._sync_tempo_route
 
     def use_hls(self):
         uri = self.get_uri()

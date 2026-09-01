@@ -557,7 +557,15 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
         # free for tempo to take. The add-on reads the mime type off the
         # ListItem, set below, not from a property.
         audio_only = isinstance(media_item, AudioItem)
-        if audio_only:
+        # A SyncPlay group's fine-sync route, decided when playback was
+        # resolved. It takes the same slot for a different purpose: the rate
+        # belongs to the engine, not to the viewer, and the pulses only reach
+        # a stream routed through the session's own tempo file.
+        sync_route = media_item.sync_tempo_route()
+
+        if sync_route:
+            use_tempo = True
+        elif audio_only:
             # Any version of the add-on can shift an audio-only stream.
             use_tempo = context.addon_enabled('inputstream.tempo')
         else:
@@ -571,6 +579,19 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
             if tempo != 1.0:
                 props['inputstream.tempo.tempo'] = str(tempo)
             props['inputstream.tempo.tempo_file'] = TEMPO_FILE
+
+            if sync_route:
+                # Deliberately overwrites both of the above. The engine
+                # converges this stream by writing rates into its own file,
+                # so an item that started at the viewer's configured speed,
+                # or that watched the add-on's own file, would be pulled off
+                # the group from the first pulse.
+                props['inputstream.tempo.tempo'] = '1.0'
+                props['inputstream.tempo.tempo_file'] = sync_route['file']
+                if sync_route.get('manifest_type'):
+                    props['inputstream.tempo.manifest_type'] = (
+                        sync_route['manifest_type']
+                    )
 
             if audio_only:
                 # Kodi's CPlayerCoreFactory::GetPlayers honours the
@@ -586,8 +607,16 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
                 # that is actually playing. start_time is audio-only - it
                 # holds output back for PAPlayer's bookmark seek, and
                 # VideoPlayer seeks before any output starts.
+                #
+                # A sync route names its own depth, and that one wins: the
+                # engine measures drift from the player time this value
+                # places, so disagreeing with it would show up as a standing
+                # offset the engine chased for the whole session.
+                queue_secs = (sync_route.get('queue_secs')
+                              if sync_route else
+                              None)
                 props['inputstream.tempo.queue_secs'] = str(
-                    get_tempo_queue_secs()
+                    queue_secs or get_tempo_queue_secs()
                 )
 
         headers = media_item.get_headers(as_string=True)

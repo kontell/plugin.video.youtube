@@ -1632,3 +1632,27 @@ msgstr ""
 msgctxt "#30831"
 msgid "Speed video playback starts at. Page Up and Page Down change it during playback, and '=' returns to 1.00x."
 msgstr ""
+
+msgctxt "#30832"
+msgid "SyncPlay provider integration"
+msgstr ""
+
+msgctxt "#30833"
+msgid "Let a SyncPlay group started elsewhere on this device drive YouTube playback, and let this add-on tell that group what it is playing. Does nothing unless a SyncPlay engine add-on is installed and running."
+msgstr ""
+
+msgctxt "#30834"
+msgid "Prefer progressive streams in a sync group"
+msgstr ""
+
+msgctxt "#30835"
+msgid "While in a SyncPlay group, resolve progressive streams instead of adaptive (DASH) ones, so playback can be routed through inputstream.tempo and the group's fine sync can converge to tens of milliseconds. Progressive YouTube streams are lower quality. With this off, group playback keeps full quality and is synchronised by pause and seek alone. Live streams are unaffected."
+msgstr ""
+
+msgctxt "#30836"
+msgid "Propose to sync group"
+msgstr ""
+
+msgctxt "#30837"
+msgid "Watch together..."
+msgstr ""
