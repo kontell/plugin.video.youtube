@@ -35,6 +35,7 @@ from .constants import (
 )
 from .context import XbmcContext
 from .monitors import PlayerMonitor, ServiceMonitor
+from .utils import syncplay
 from .utils.file_system import rm_dir
 from ..youtube.provider import Provider
 
@@ -73,6 +74,13 @@ def run():
     if ui.get_property(SERVICE_RUNNING_FLAG) == BUSY_FLAG:
         monitor.refresh_container()
     set_property(SERVICE_RUNNING_FLAG)
+
+    # Offer this add-on to a SyncPlay engine as a content provider, so a group
+    # can start YouTube videos on this box. Registrations live only as long as
+    # an engine's service generation, so this is not the only send - the
+    # monitor registers again on every SyncSession.State announce.
+    if context.get_settings().syncplay_enabled():
+        syncplay.register()
 
     # wipe add-on temp folder on updates/restarts (subtitles, and mpd files)
     rm_dir(TEMP_PATH)

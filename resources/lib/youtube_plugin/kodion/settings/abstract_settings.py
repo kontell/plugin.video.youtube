@@ -201,6 +201,22 @@ class AbstractSettings(object):
     def video_tempo(self):
         return self._tempo_rate(SETTINGS.VIDEO_TEMPO)
 
+    def syncplay_enabled(self):
+        # Everything this gates is already gated on a SyncPlay engine
+        # publishing its state property, so with no engine installed the
+        # setting costs one notification per service start. It exists as the
+        # switch that turns the integration off without a re-install.
+        return self.get_bool(SETTINGS.SYNCPLAY_ENABLED, True)
+
+    def syncplay_finesync(self):
+        # Fine sync needs inputstream.tempo to hold the ListItem's one
+        # inputstream slot, and inputstream.adaptive takes it whenever it
+        # handles the item - so tens-of-milliseconds convergence and
+        # adaptive streaming are mutually exclusive for the same item.
+        # Off by default: a group member keeps today's picture and the
+        # engine's command-only sync unless they ask for the trade.
+        return self.get_bool(SETTINGS.SYNCPLAY_FINESYNC, False)
+
     def get_subtitle_selection(self):
         return self.get_int(SETTINGS.SUBTITLE_SELECTION, 0)
 

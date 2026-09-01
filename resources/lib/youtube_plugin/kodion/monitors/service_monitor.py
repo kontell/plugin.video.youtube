@@ -42,6 +42,7 @@ from ..constants import (
     VIDEO_ID,
 )
 from ..network import get_connect_address, get_http_server, httpd_status
+from ..utils import syncplay
 from ..utils.methods import jsonrpc
 
 
@@ -156,6 +157,20 @@ class ServiceMonitor(xbmc.Monitor):
                                          params=params)
                         context.get_ui().set_property(PLAY_CANCELLED)
 
+            return
+
+        if method == syncplay.STATE_METHOD:
+            # A SyncPlay engine says its session state changed - and its own
+            # start-up announce is one of those, which is the cue to register
+            # again. Registrations are not persisted anywhere, by design, so
+            # an add-on that registered only at its own start would quietly
+            # stop being startable the first time the engine restarted.
+            #
+            # Matched on the method rather than the sender: the contract puts
+            # this name outside any one engine's namespace so it survives a
+            # re-hosting, and registering again is idempotent.
+            if self._context.get_settings().syncplay_enabled():
+                syncplay.register()
             return
 
         if sender != ADDON_ID:

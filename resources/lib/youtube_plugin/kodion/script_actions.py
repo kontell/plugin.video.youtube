@@ -21,6 +21,7 @@ from .constants import (
     RELOAD_ACCESS_MANAGER,
     SERVER_WAKEUP,
     TEMP_PATH,
+    VIDEO_ID,
     WAIT_END_FLAG,
 )
 from .context import XbmcContext
@@ -30,6 +31,7 @@ from .network import (
     get_listen_addresses,
     httpd_status,
 )
+from .utils import syncplay
 from .utils.file_system import rm_dir
 from ..youtube import Provider
 
@@ -355,6 +357,31 @@ def _maintenance_actions(context, action, params):
         ui.show_notification(localize('succeeded' if succeeded else 'failed'))
 
 
+def _syncplay_actions(context, action, params):
+    """The SyncPlay group entry points behind the video context menu.
+
+    Both are fire-and-forget notifications to whichever add-on hosts the
+    engine: this add-on does not own groups, membership or the player, and
+    deliberately learns nothing about them beyond the session state it reads.
+    """
+    if not context.get_settings().syncplay_enabled():
+        return
+
+    if action == 'menu':
+        syncplay.open_menu()
+        return
+
+    if action == 'propose':
+        video_id = params.get(VIDEO_ID) if params else None
+        if not video_id:
+            log.error('SyncPlay propose without a video_id')
+            return
+        syncplay.propose(video_id,
+                         name=params.get('name'),
+                         duration=params.get('runtime'))
+        return
+
+
 def _user_actions(context, action, params):
     if params:
         context.parse_params(params)
@@ -534,6 +561,10 @@ def run(argv):
 
         if category == 'users':
             _user_actions(context, action, params)
+            return
+
+        if category == 'sync':
+            _syncplay_actions(context, action, params)
             return
     finally:
         ui.set_property(WAIT_END_FLAG)

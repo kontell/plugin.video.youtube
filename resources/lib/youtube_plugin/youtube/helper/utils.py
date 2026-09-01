@@ -43,6 +43,7 @@ from ...kodion.items import (
     MediaItem,
     menu_items,
 )
+from ...kodion.utils import syncplay
 from ...kodion.utils.convert_format import (
     channel_filter_split,
     friendly_number,
@@ -699,6 +700,14 @@ def update_video_items(provider, context, video_id_dict,
             playlist_id = playlist_match.group(PLAYLIST_ID)
             playlist_channel_id = playlist_match.group(CHANNEL_ID)
 
+    # Read once for the whole listing rather than per item. An empty session
+    # means no SyncPlay engine is running here, and the entry is then left off
+    # every item - nothing changes for anyone without one installed.
+    sync_session = (syncplay.session_state()
+                    if settings.syncplay_enabled() else
+                    {})
+    sync_in_group = syncplay.in_group(sync_session)
+
     cxm_remove_from_playlist = menu_items.playlist_remove_from(
         context,
         playlist_id=playlist_id,
@@ -1081,6 +1090,13 @@ def update_video_items(provider, context, video_id_dict,
                 cxm_play_from if item_from_playlist else None,
                 cxm_queue,
             ))
+
+            if sync_session:
+                context_menu.append(
+                    menu_items.syncplay_watch_together(
+                        context, media_item, sync_in_group
+                    )
+                )
 
         # add 'Watch Later' only if we are not in my 'Watch Later' list
         if not available or in_watch_later_list:

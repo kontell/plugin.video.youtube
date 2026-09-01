@@ -346,6 +346,8 @@ class XbmcContext(AbstractContext):
         'subtitles.translation.x': 30775,
         'subtitles.with_fallback': 30601,
         'succeeded': 30575,
+        'syncplay.propose': 30836,
+        'syncplay.watch_together': 30837,
         'trending': 30513,
         'unsubscribe': 30505,
         'unsubscribed.from.channel': 30720,

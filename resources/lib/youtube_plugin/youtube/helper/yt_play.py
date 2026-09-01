@@ -46,6 +46,7 @@ from ...kodion.constants import (
 )
 from ...kodion.items import AudioItem, UriItem, VideoItem
 from ...kodion.network import get_connect_address
+from ...kodion.utils import syncplay
 from ...kodion.utils.datetime import datetime_to_since
 from ...kodion.utils.redact import redact_params
 from ...kodion.utils.tempo import (
@@ -70,6 +71,14 @@ def _play_stream(provider, context):
     incognito = params.get(INCOGNITO, False)
     screensaver = params.get(SCREENSAVER, False)
 
+    # Read the SyncPlay session once, so every decision below - which streams
+    # to resolve, whether the speed keys are the viewer's, what the claim says
+    # - is made against one answer rather than a property that could change
+    # between them.
+    use_syncplay = settings.syncplay_enabled() and not screensaver
+    sync_state = syncplay.session_state() if use_syncplay else {}
+    sync_in_group = syncplay.in_group(sync_state)
+
     audio_only = False
     is_external = ui.get_property(PLAY_USING, as_bool=True)
     if ((is_external and settings.alternative_player_web_urls())
@@ -91,7 +100,29 @@ def _play_stream(provider, context):
         elif audio_only is None:
             audio_only = not ask_for_quality and settings.audio_only()
 
-        use_mpd = ((not is_external or settings.alternative_player_mpd())
+        # Fine sync needs inputstream.tempo to hold the item's one
+        # inputstream slot, and inputstream.adaptive takes that slot
+        # whenever it handles the item. So the group member who wants
+        # tens-of-milliseconds convergence has to give up adaptive
+        # streaming for the item, and says so with a setting.
+        #
+        # Not 'progressive': YouTube no longer offers a muxed progressive
+        # rendition for this content. Measured on a 4K video - MPD on gives
+        # one adaptive DASH stream and nothing else; MPD off gives an
+        # adaptive HLS and a non-adaptive HLS. The non-adaptive one is what
+        # tempo can take, and it is what this selects.
+        force_direct = (sync_in_group
+                        and not audio_only
+                        and settings.syncplay_finesync()
+                        and tempo_supports_video())
+
+        # This has to reach back as far as the extraction. With MPD on,
+        # load_stream_info returns exactly one stream - the generated
+        # manifest - and no non-adaptive entry at all, so filtering its
+        # result is filtering a list that never contained what we wanted.
+        # Measured: streams=1, and the selection below found nothing.
+        use_mpd = (not force_direct
+                   and (not is_external or settings.alternative_player_mpd())
                    and settings.use_mpd_videos()
                    and context.ipc_exec(SERVER_WAKEUP, timeout=5))
 
@@ -132,7 +163,25 @@ def _play_stream(provider, context):
             ask_for_quality=ask_for_quality,
             audio_only=audio_only,
             use_mpd=use_mpd,
+            force_direct=force_direct,
         )
+
+        if stream is None and force_direct:
+            # Nothing the tempo route can take - a live stream, or content
+            # served only as adaptive. Fine sync is not worth failing
+            # playback over: fall back and let the engine hold this member
+            # with commands alone, which is the floor it gives anything.
+            logging.info('SyncPlay: no tempo-routable stream;'
+                         ' falling back to adaptive')
+            force_direct = False
+            stream = _select_stream(
+                context,
+                streams,
+                ask_for_quality=ask_for_quality,
+                audio_only=audio_only,
+                use_mpd=use_mpd,
+            )
+
         if stream is None:
             return False
 
@@ -166,18 +215,6 @@ def _play_stream(provider, context):
         video_id=video_id,
     )
 
-    # Arm inputstream.tempo's speed keys while it owns the stream, and make
-    # sure they are inert when it does not. Its keymap binds FullscreenVideo
-    # as well as the music windows and has no guard beyond this sentinel, so
-    # one left behind would capture Page Up/Page Down during ordinary
-    # playback. PlayerMonitor.onPlayBackEnded disarms them again at the end.
-    if audio_only or not video_type:
-        arm_speed_keys(settings.audio_only_tempo())
-    elif settings.video_tempo_enabled() and tempo_supports_video():
-        arm_speed_keys(settings.video_tempo())
-    else:
-        disarm_speed_keys()
-
     use_history = not (screensaver or incognito or stream.get('live'))
     use_remote_history = use_history and settings.use_remote_history()
     use_local_history = use_history and settings.use_local_history()
@@ -185,6 +222,48 @@ def _play_stream(provider, context):
     utils.update_play_info(
         provider, context, video_id, media_item, stream, yt_item
     )
+
+    # Tell the SyncPlay engine what this add-on just put on screen. Without a
+    # claim it cannot tell a member's own playback from the group's, so it
+    # demotes them to spectator - which is the right default for an add-on
+    # that has not opted in, and the thing this call exists to stop.
+    #
+    # The fine-sync route rides along only when the item really was resolved
+    # progressive: update_play_info clears use_isa for a non-adaptive stream,
+    # and that - not what was asked for above - is what decides whether the
+    # inputstream slot is free for tempo to take.
+    sync_route = None
+    if use_syncplay:
+        if (sync_in_group
+                and not audio_only
+                and video_type
+                and not media_item.use_isa()
+                and tempo_supports_video()):
+            sync_route = syncplay.tempo_route()
+        if sync_route:
+            media_item.set_sync_tempo_route(sync_route)
+        syncplay.claim(video_id,
+                       name=metadata.get('title', ''),
+                       duration=media_item.get_duration(),
+                       tempo=sync_route)
+
+    # Arm inputstream.tempo's speed keys while it owns the stream, and make
+    # sure they are inert when it does not. Its keymap binds FullscreenVideo
+    # as well as the music windows and has no guard beyond this sentinel, so
+    # one left behind would capture Page Up/Page Down during ordinary
+    # playback. PlayerMonitor.onPlayBackEnded disarms them again at the end.
+    if sync_route:
+        # The rate belongs to the engine for as long as it is converging this
+        # stream, so the viewer does not get the keys: a press would pull
+        # this member off the group, and the engine would spend the rest of
+        # the session pulling it back.
+        disarm_speed_keys()
+    elif audio_only or not video_type:
+        arm_speed_keys(settings.audio_only_tempo())
+    elif settings.video_tempo_enabled() and tempo_supports_video():
+        arm_speed_keys(settings.video_tempo())
+    else:
+        disarm_speed_keys()
 
     seek_time = 0.0 if params.get('resume') else params.get('seek', 0.0)
     start_time = params.get('start', 0.0)
@@ -354,9 +433,20 @@ def _select_stream(context,
                    stream_data_list,
                    ask_for_quality,
                    audio_only,
-                   use_mpd=True):
+                   use_mpd=True,
+                   force_direct=False):
     settings = context.get_settings()
-    if settings.use_isa():
+    if force_direct:
+        # Reproduce the ISA-off path for one playback, without touching the
+        # global setting. Clearing use_mpd alone is not enough: with ISA
+        # enabled the adaptive HLS entries stay in the list below and sort
+        # above every progressive one, so the item would come back adaptive
+        # and inputstream.tempo would find its slot already taken.
+        use_mpd = False
+        use_adaptive = False
+        use_live_adaptive = False
+        use_live_mpd = False
+    elif settings.use_isa():
         isa_capabilities = context.inputstream_adaptive_capabilities()
         use_adaptive = bool(isa_capabilities)
         use_live_adaptive = use_adaptive and 'live' in isa_capabilities

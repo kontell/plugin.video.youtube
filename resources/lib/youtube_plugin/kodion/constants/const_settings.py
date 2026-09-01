@@ -28,6 +28,9 @@ AUDIO_ONLY_PAPLAYER = 'kodion.audio_only.paplayer'  # (bool)
 VIDEO_TEMPO_ENABLED = 'kodion.video.tempo.enabled'  # (bool)
 VIDEO_TEMPO = 'kodion.video.tempo'  # (float)
 
+SYNCPLAY_ENABLED = 'kodion.syncplay.enabled'  # (bool)
+SYNCPLAY_FINESYNC = 'kodion.syncplay.finesync'  # (bool)
+
 SUBTITLE_SELECTION = 'kodion.subtitle.languages.num'  # (int)
 SUBTITLE_DOWNLOAD = 'kodion.subtitle.download'  # (bool)
 

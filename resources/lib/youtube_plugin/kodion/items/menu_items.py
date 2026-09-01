@@ -10,7 +10,9 @@
 
 from __future__ import absolute_import, division, unicode_literals
 
+from ..compatibility import urlencode
 from ..constants import (
+    ADDON_ID,
     ARTIST,
     BOOKMARK_ID,
     CHANNEL_ID,
@@ -195,6 +197,50 @@ def media_queue(context):
     return (
         context.localize('video.queue'),
         'Action(Queue)'
+    )
+
+
+def syncplay_watch_together(context, media_item, in_group):
+    """One slot, two actions, for a SyncPlay group's entry point.
+
+    In a group the video becomes the proposal; outside one there is no group
+    to propose to yet, so the entry opens the engine's own group menu
+    instead. The caller offers this only when an engine has published a
+    session, so a listing grows no entry at all on a box without one.
+
+    Built per item, not from a $INFO[] infolabel: a proposal carries a
+    display name and a runtime, and neither is reachable that way. RunScript
+    rather than the plugin route, so this stays a fire-and-forget action that
+    never touches the listing it was invoked from.
+    """
+    if in_group:
+        label = 'syncplay.propose'
+        action = 'propose'
+        query = '?' + urlencode({
+            VIDEO_ID: media_item.video_id,
+            'name': media_item.get_name() or '',
+            # Seconds; the adapter converts. An item with no duration reads
+            # -1, not 0, and a live one never gets a duration at all - so
+            # clamp here rather than put a negative runtime on the wire.
+            # Zero is the honest answer for both, and the engine reads it as
+            # "do not clamp positions on this item".
+            'runtime': max(0, media_item.get_duration() or 0),
+        })
+    else:
+        label = 'syncplay.watch_together'
+        action = 'menu'
+        query = ''
+
+    return (
+        context.localize(label),
+        # urlencode is what makes this safe to embed: Kodi splits a builtin's
+        # arguments on commas, and a video title containing one would
+        # otherwise truncate the call.
+        'RunScript({addon},sync/{action}{query})'.format(
+            addon=ADDON_ID,
+            action=action,
+            query=query,
+        ),
     )
 
 
