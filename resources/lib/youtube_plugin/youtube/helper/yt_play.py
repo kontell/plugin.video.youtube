@@ -101,20 +101,28 @@ def _play_stream(provider, context):
             audio_only = not ask_for_quality and settings.audio_only()
 
         # Fine sync needs inputstream.tempo to hold the item's one
-        # inputstream slot, which it can only do on a progressive stream -
-        # inputstream.adaptive takes that slot whenever it handles the item.
-        # So the group member who wants tens-of-milliseconds convergence
-        # trades DASH for it, and says so with a setting.
-        force_progressive = (sync_in_group
-                             and not audio_only
-                             and settings.syncplay_progressive()
-                             and tempo_supports_video())
+        # inputstream slot, and inputstream.adaptive takes that slot
+        # whenever it handles the item. So the group member who wants
+        # tens-of-milliseconds convergence has to give up adaptive
+        # streaming for the item, and says so with a setting.
+        #
+        # Not 'progressive': YouTube no longer offers a muxed progressive
+        # rendition for this content. Measured on a 4K video - MPD on gives
+        # one adaptive DASH stream and nothing else; MPD off gives an
+        # adaptive HLS and a non-adaptive HLS. The non-adaptive one is what
+        # tempo can take, and it is what this selects.
+        force_direct = (sync_in_group
+                        and not audio_only
+                        and settings.syncplay_finesync()
+                        and tempo_supports_video())
 
-        # Left alone deliberately, even when forcing progressive: the MPD it
-        # generates goes unused, but a video with no progressive rendition
-        # then still has a DASH stream to fall back to below. _select_stream
-        # is the single place that decides what the item ends up being.
-        use_mpd = ((not is_external or settings.alternative_player_mpd())
+        # This has to reach back as far as the extraction. With MPD on,
+        # load_stream_info returns exactly one stream - the generated
+        # manifest - and no non-adaptive entry at all, so filtering its
+        # result is filtering a list that never contained what we wanted.
+        # Measured: streams=1, and the selection below found nothing.
+        use_mpd = (not force_direct
+                   and (not is_external or settings.alternative_player_mpd())
                    and settings.use_mpd_videos()
                    and context.ipc_exec(SERVER_WAKEUP, timeout=5))
 
@@ -155,16 +163,17 @@ def _play_stream(provider, context):
             ask_for_quality=ask_for_quality,
             audio_only=audio_only,
             use_mpd=use_mpd,
-            force_progressive=force_progressive,
+            force_direct=force_direct,
         )
 
-        if stream is None and force_progressive:
-            # A live stream has no progressive rendition at all, so forcing
-            # one leaves nothing to select. Fine sync is not worth failing
-            # playback over - fall back and let the group hold this member
-            # with commands alone.
-            logging.debug('SyncPlay: no progressive stream; adaptive fallback')
-            force_progressive = False
+        if stream is None and force_direct:
+            # Nothing the tempo route can take - a live stream, or content
+            # served only as adaptive. Fine sync is not worth failing
+            # playback over: fall back and let the engine hold this member
+            # with commands alone, which is the floor it gives anything.
+            logging.info('SyncPlay: no tempo-routable stream;'
+                         ' falling back to adaptive')
+            force_direct = False
             stream = _select_stream(
                 context,
                 streams,
@@ -425,9 +434,9 @@ def _select_stream(context,
                    ask_for_quality,
                    audio_only,
                    use_mpd=True,
-                   force_progressive=False):
+                   force_direct=False):
     settings = context.get_settings()
-    if force_progressive:
+    if force_direct:
         # Reproduce the ISA-off path for one playback, without touching the
         # global setting. Clearing use_mpd alone is not enough: with ISA
         # enabled the adaptive HLS entries stay in the list below and sort

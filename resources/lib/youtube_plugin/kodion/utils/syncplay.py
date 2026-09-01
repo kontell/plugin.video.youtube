@@ -115,12 +115,21 @@ MAX_NAME_LENGTH = 256
 def _send(message, data):
     """One contract notification, from this add-on's own id.
 
-    Never raises: this is called from the play route and from the notification
-    thread, and a bus that is not listening must not be able to break either.
+    No 'no_response' here, deliberately. It looks like the right economy for
+    a notification nobody reads a reply to, but it drops the request 'id' -
+    and Kodi discards an id-less JSONRPC.NotifyAll without executing it and
+    without logging anything. executeJSONRPC still returns, the caller still
+    sees success, and the message simply never reaches the bus. Measured:
+    of two otherwise identical Registers, only the one carrying an id
+    reached the engine. The rest of this add-on's send_notification helpers
+    keep the id for the same reason.
+
+    Never raises: this is called from the play route and from the
+    notification thread, and a bus that is not listening must not be able to
+    break either.
     """
     try:
-        jsonrpc(no_response=True,
-                method='JSONRPC.NotifyAll',
+        jsonrpc(method='JSONRPC.NotifyAll',
                 params={
                     'sender': ADDON_ID,
                     'message': message,
@@ -129,6 +138,7 @@ def _send(message, data):
     except Exception:
         log.exception('SyncPlay {message} failed', message=message)
         return False
+    log.debug('SyncPlay sent {message}', message=message)
     return True
 
 

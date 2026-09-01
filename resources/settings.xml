@@ -264,7 +264,7 @@
                     <default>true</default>
                     <control type="toggle"/>
                 </setting>
-                <setting id="kodion.syncplay.progressive" type="boolean" parent="kodion.syncplay.enabled" label="30834" help="30835">
+                <setting id="kodion.syncplay.finesync" type="boolean" parent="kodion.syncplay.enabled" label="30834" help="30835">
                     <level>0</level>
                     <default>false</default>
                     <dependencies>

@@ -208,14 +208,14 @@ class AbstractSettings(object):
         # switch that turns the integration off without a re-install.
         return self.get_bool(SETTINGS.SYNCPLAY_ENABLED, True)
 
-    def syncplay_progressive(self):
+    def syncplay_finesync(self):
         # Fine sync needs inputstream.tempo to hold the ListItem's one
         # inputstream slot, and inputstream.adaptive takes it whenever it
-        # handles the item - so tens-of-milliseconds convergence and DASH are
-        # mutually exclusive, and progressive YouTube is the lower quality.
+        # handles the item - so tens-of-milliseconds convergence and
+        # adaptive streaming are mutually exclusive for the same item.
         # Off by default: a group member keeps today's picture and the
         # engine's command-only sync unless they ask for the trade.
-        return self.get_bool(SETTINGS.SYNCPLAY_PROGRESSIVE, False)
+        return self.get_bool(SETTINGS.SYNCPLAY_FINESYNC, False)
 
     def get_subtitle_selection(self):
         return self.get_int(SETTINGS.SUBTITLE_SELECTION, 0)
