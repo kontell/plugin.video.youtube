@@ -34,6 +34,7 @@ __all__ = (
     'urljoin',
     'urlsplit',
     'urlunsplit',
+    'video_chapters_supported',
     'xbmc',
     'xbmcaddon',
     'xbmcgui',
@@ -327,6 +328,10 @@ if hasattr(xbmcgui.ListItem, 'setDateTime'):
 else:
     def datetime_infolabel(datetime_obj, str_format='%Y-%m-%d %H:%M:%S'):
         return datetime_obj.strftime(str_format)
+
+# Kodi with InfoTagVideo.setChapters()
+video_chapters_supported = hasattr(getattr(xbmc, 'InfoTagVideo', None),
+                                   'setChapters')
 
 try:
     from os import sched_getaffinity as _sched_get_affinity

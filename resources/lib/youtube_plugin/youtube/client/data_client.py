@@ -1957,6 +1957,46 @@ class YouTubeDataClient(YouTubeLoginClient):
         }
         return v3_response
 
+    def get_chapters(self, video_id):
+        result = self.api_request('v1', 'POST', path='next',
+                                  post_data={'videoId': video_id},
+                                  do_auth=False)
+        chapters = self.json_traverse(result, path=(
+            'playerOverlays',
+            'playerOverlayRenderer',
+            'decoratedPlayerBarRenderer',
+            'decoratedPlayerBarRenderer',
+            'playerBar',
+            'multiMarkersPlayerBarRenderer',
+            'markersMap',
+            slice(None),
+            None,
+            'value',
+            'chapters',
+        ))
+        if not chapters:
+            return []
+
+        output = []
+        for chapter in chapters:
+            chapter = chapter.get('chapterRenderer')
+            if not chapter or 'timeRangeStartMillis' not in chapter:
+                continue
+            thumbnails = self.json_traverse(chapter, path=(
+                'thumbnail',
+                'thumbnails',
+            ))
+            output.append({
+                'title': self.json_traverse(chapter, path=(
+                    'title',
+                    'simpleText',
+                ), default=''),
+                'start': chapter['timeRangeStartMillis'] / 1000,
+                'thumbnail': thumbnails[-1].get('url') if thumbnails else None,
+            })
+        output.sort(key=lambda chapter: chapter['start'])
+        return output
+
     def get_parent_comments(self,
                             video_id,
                             page_token='',

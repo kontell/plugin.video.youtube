@@ -17,7 +17,13 @@ from collections import defaultdict
 from ..helper import utils, v3
 from ..youtube_exceptions import YouTubeException
 from ...kodion import logging
-from ...kodion.compatibility import string_type, urlencode, urlunsplit, xbmc
+from ...kodion.compatibility import (
+    string_type,
+    urlencode,
+    urlunsplit,
+    video_chapters_supported,
+    xbmc,
+)
 from ...kodion.constants import (
     BUSY_FLAG,
     CHANNEL_ID,
@@ -168,6 +174,11 @@ def _play_stream(provider, context):
     utils.update_play_info(
         provider, context, video_id, media_item, stream, yt_item
     )
+
+    if (video_chapters_supported
+            and isinstance(media_item, VideoItem)
+            and not media_item.live):
+        media_item.set_chapters(client.get_chapters(video_id))
 
     seek_time = 0.0 if params.get('resume') else params.get('seek', 0.0)
     start_time = params.get('start', 0.0)

@@ -67,6 +67,7 @@ class MediaItem(BaseItem):
         self._license_key = None
         self._uses_isa = None
         self.subtitles = None
+        self.chapters = None
 
         self._completed = False
         self._live = False
@@ -292,6 +293,10 @@ class MediaItem(BaseItem):
     def set_subtitles(self, value):
         if value and isinstance(value, (list, tuple)):
             self.subtitles = value
+
+    def set_chapters(self, value):
+        if value and isinstance(value, (list, tuple)):
+            self.chapters = value
 
     @property
     def completed(self):
