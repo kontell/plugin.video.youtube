@@ -1611,6 +1611,46 @@ class YouTubePlayerClient(YouTubeDataClient):
             return result['simpleText']
         return None
 
+    @staticmethod
+    def _storyboard_levels(spec, duration):
+        """YouTube's storyboard spec as levels of scrub previews, coarsest
+        first: thumbnails of width x height, count of them, columns x rows to
+        a tile, the interval between two in ms, and the tile URLs.
+
+        base|w#h#count#cols#rows#interval#name#sigh|... with $L, $N and $M in
+        the base URL for the level, its name and the tile; an interval of 0
+        means the duration shared out over the count."""
+        if not spec or not duration:
+            return []
+        parts = spec.split('|')
+        base = parts[0]
+        levels = []
+        for level, args in enumerate(parts[1:]):
+            fields = args.split('#')
+            if len(fields) != 8:
+                continue
+            try:
+                width, height, count, columns, rows, interval = [
+                    int(field) for field in fields[:6]
+                ]
+            except ValueError:
+                continue
+            if not (width and height and count and columns and rows):
+                continue
+            url = (base.replace('$L', str(level)).replace('$N', fields[6])
+                   + '&sigh=' + fields[7])
+            tiles = -(-count // (columns * rows))
+            levels.append({
+                'width': width,
+                'height': height,
+                'count': count,
+                'columns': columns,
+                'rows': rows,
+                'interval': interval or int(round(duration * 1000.0 / count)),
+                'tiles': [url.replace('$M', str(tile)) for tile in range(tiles)],
+            })
+        return levels
+
     def load_stream_info(self,
                          video_id,
                          ask_for_quality=None,
@@ -1656,6 +1696,7 @@ class YouTubePlayerClient(YouTubeDataClient):
         _client = None
         _has_auth = None
         _result = None
+        storyboard_spec = None
         _video_details = None
         _microformat = None
         _streaming_data = None
@@ -1891,6 +1932,11 @@ class YouTubePlayerClient(YouTubeDataClient):
                     }
                     client_data['_auth_requested'] = False
 
+                if not storyboard_spec:
+                    storyboard_spec = (_result.get('storyboards', {})
+                                       .get('playerStoryboardSpecRenderer', {})
+                                       .get('spec'))
+
                 responses[_client_name] = {
                     'client': _client,
                     'progressive_fmts': _streaming_data.get('formats'),
@@ -1951,6 +1997,9 @@ class YouTubePlayerClient(YouTubeDataClient):
 
         meta_info = {
             'id': video_id,
+            'storyboards': self._storyboard_levels(
+                storyboard_spec, int(video_details.get('lengthSeconds') or 0)
+            ),
             'title': unescape(video_details.get('title', '')
                               .encode('raw_unicode_escape')
                               .decode('raw_unicode_escape')),

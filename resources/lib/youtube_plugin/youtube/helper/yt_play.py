@@ -22,6 +22,7 @@ from ...kodion.compatibility import (
     urlencode,
     urlunsplit,
     video_chapters_supported,
+    video_scrub_previews_supported,
     xbmc,
 )
 from ...kodion.constants import (
@@ -179,6 +180,11 @@ def _play_stream(provider, context):
             and isinstance(media_item, VideoItem)
             and not media_item.live):
         media_item.set_chapters(client.get_chapters(video_id))
+
+    if (video_scrub_previews_supported
+            and isinstance(media_item, VideoItem)
+            and not media_item.live):
+        media_item.set_scrub_previews(metadata.get('storyboards'))
 
     seek_time = 0.0 if params.get('resume') else params.get('seek', 0.0)
     start_time = params.get('start', 0.0)

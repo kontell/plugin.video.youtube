@@ -571,6 +571,23 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
             for start, end, chapter in zip(starts, ends, chapters)
         ])
 
+    previews = media_item.scrub_previews
+    if previews:
+        # the sharpest level that still fits a TV's preview, else the coarsest
+        level = max(
+            (level for level in previews if level['width'] <= 320),
+            key=lambda level: level['width'],
+            default=previews[0],
+        )
+        list_item.getVideoInfoTag().setScrubPreviews(
+            level['interval'],
+            level['width'],
+            level['height'],
+            level['columns'],
+            level['rows'],
+            level['tiles'],
+        )
+
     return list_item
 
 

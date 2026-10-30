@@ -35,6 +35,7 @@ __all__ = (
     'urlsplit',
     'urlunsplit',
     'video_chapters_supported',
+    'video_scrub_previews_supported',
     'xbmc',
     'xbmcaddon',
     'xbmcgui',
@@ -332,6 +333,10 @@ else:
 # Kodi with InfoTagVideo.setChapters()
 video_chapters_supported = hasattr(getattr(xbmc, 'InfoTagVideo', None),
                                    'setChapters')
+
+# Kodi with InfoTagVideo.setScrubPreviews()
+video_scrub_previews_supported = hasattr(getattr(xbmc, 'InfoTagVideo', None),
+                                         'setScrubPreviews')
 
 try:
     from os import sched_getaffinity as _sched_get_affinity
