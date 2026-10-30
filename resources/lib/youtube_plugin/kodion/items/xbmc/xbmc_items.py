@@ -586,6 +586,7 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
             level['columns'],
             level['rows'],
             level['tiles'],
+            level['count'],
         )
 
     return list_item
