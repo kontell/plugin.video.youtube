@@ -1957,6 +1957,46 @@ class YouTubeDataClient(YouTubeLoginClient):
         }
         return v3_response
 
+    def get_chapters(self, video_id):
+        result = self.api_request('v1', 'POST', path='next',
+                                  post_data={'videoId': video_id},
+                                  do_auth=False)
+        chapters = self.json_traverse(result, path=(
+            'playerOverlays',
+            'playerOverlayRenderer',
+            'decoratedPlayerBarRenderer',
+            'decoratedPlayerBarRenderer',
+            'playerBar',
+            'multiMarkersPlayerBarRenderer',
+            'markersMap',
+            slice(None),
+            None,
+            'value',
+            'chapters',
+        ))
+        if not chapters:
+            return []
+
+        output = []
+        for chapter in chapters:
+            chapter = chapter.get('chapterRenderer')
+            if not chapter or 'timeRangeStartMillis' not in chapter:
+                continue
+            thumbnails = self.json_traverse(chapter, path=(
+                'thumbnail',
+                'thumbnails',
+            ))
+            output.append({
+                'title': self.json_traverse(chapter, path=(
+                    'title',
+                    'simpleText',
+                ), default=''),
+                'start': chapter['timeRangeStartMillis'] / 1000,
+                'thumbnail': thumbnails[-1].get('url') if thumbnails else None,
+            })
+        output.sort(key=lambda chapter: chapter['start'])
+        return output
+
     def get_parent_comments(self,
                             video_id,
                             page_token='',
@@ -2409,14 +2449,14 @@ class YouTubeDataClient(YouTubeLoginClient):
                     _refresh = refresh or cached['age'] > ttl
                     feed_details['refresh'] = _refresh
                     if _refresh:
-                        to_refresh.add(channel_id)
+                        to_refresh.add(channel_id or item_id)
 
                     if item_id in feeds:
                         feeds[item_id].update(feed_details)
                     else:
                         feeds[item_id] = feed_details
                 else:
-                    to_refresh.add(channel_id)
+                    to_refresh.add(channel_id or item_id)
 
             return True, False
 
@@ -2582,6 +2622,9 @@ class YouTubeDataClient(YouTubeLoginClient):
                     feed_items = feed_items[:min(1000, feed_limits['num'])]
                 elif cached_items:
                     feed_items = cached_items
+                    refresh_feed = root is None
+                else:
+                    refresh_feed = True
 
                 if refresh_feed:
                     new_cache[item_id] = {
@@ -2630,12 +2673,16 @@ class YouTubeDataClient(YouTubeLoginClient):
                             check_inputs,
                             **_kwargs):
             active_thread_ids = threads['active_thread_ids']
+            balance_enable = threads['balance']
+            counts = threads['counts']
+            loop_enable = threads['loop_enable']
+
             thread_id = threading.current_thread().ident
             active_thread_ids.add(thread_id)
-            counts = threads['counts']
+
             complete = False
-            while not threads['balance'].is_set():
-                threads['loop_enable'].set()
+            while not balance_enable.is_set():
+                loop_enable.set()
                 if kwargs is True:
                     _kwargs = {}
                 elif kwargs:
@@ -2669,7 +2716,7 @@ class YouTubeDataClient(YouTubeLoginClient):
                 if complete or not success or not counts[pool_id]:
                     break
             else:
-                threads['balance'].clear()
+                balance_enable.clear()
 
             threads['counter'].release()
             if complete:
@@ -2677,8 +2724,8 @@ class YouTubeDataClient(YouTubeLoginClient):
             elif counts[pool_id]:
                 counts[pool_id] -= 1
             counts['all'] -= 1
-            threads['active_thread_ids'].discard(thread_id)
-            threads['loop_enable'].set()
+            active_thread_ids.discard(thread_id)
+            loop_enable.set()
 
         max_threads = min(32, 2 * (available_cpu_count() + 4))
         counts = {
@@ -2707,42 +2754,50 @@ class YouTubeDataClient(YouTubeLoginClient):
 
             def _get_updated_subscriptions(new_data, old_data):
                 new_items = new_data and new_data.get('items')
-                if not new_items:
-                    new_data['_abort'] = True
-                    return new_data
-
                 old_items = old_data and old_data.get('items')
-                if old_items:
-                    old_items = {
-                        item['snippet']['resourceId']['channelId']:
-                            item['contentDetails']
-                        for item in old_items
-                    }
 
-                    old_subscriptions = False
-                    updated_subscriptions = set()
-                    for item in new_items:
-                        channel_id = item['snippet']['resourceId']['channelId']
-                        if channel_id in updated_subscriptions:
-                            continue
+                if not new_items and not old_items:
+                    return None
 
-                        item_counts = item['contentDetails']
-                        if (item_counts['newItemCount']
-                                or (channel_id in old_items
-                                    and item_counts['totalItemCount']
-                                    > old_items[channel_id]['totalItemCount'])):
-                            updated_subscriptions.add(channel_id)
-                        else:
-                            old_subscriptions = True
-
-                    if old_subscriptions:
-                        new_data['nextPageToken'] = None
-                else:
-                    updated_subscriptions = {
+                if not old_items:
+                    new_data['_updated'] = {
                         item['snippet']['resourceId']['channelId']
                         for item in new_items
                     }
+                    return new_data
 
+                if not new_items:
+                    if new_data:
+                        return new_data
+                    old_data['_updated_subscriptions'] = None
+                    return old_data
+
+                old_items = {
+                    item['snippet']['resourceId']['channelId']:
+                        item['contentDetails']
+                    for item in old_items
+                }
+
+                old_subscriptions = False
+                updated_subscriptions = set()
+                for item in new_items:
+                    channel_id = item['snippet']['resourceId']['channelId']
+                    if channel_id in updated_subscriptions:
+                        continue
+
+                    item_counts = item['contentDetails']
+                    if item_counts['newItemCount']:
+                        updated_subscriptions.add(channel_id)
+                    elif channel_id in old_items:
+                        new_count = item_counts.get('totalItemCount')
+                        old_count = old_items[channel_id].get('totalItemCount')
+                        if new_count and not old_count or new_count > old_count:
+                            updated_subscriptions.add(channel_id)
+                    else:
+                        old_subscriptions = True
+
+                if old_subscriptions:
+                    new_data['nextPageToken'] = None
                 new_data['_updated_subscriptions'] = updated_subscriptions
                 return new_data
 
@@ -2761,7 +2816,7 @@ class YouTubeDataClient(YouTubeLoginClient):
                     params=_params,
                     **kwargs
                 )
-                if not json_data or json_data.get('_abort'):
+                if not json_data:
                     return False, True
 
                 updated_subscriptions = json_data.get('_updated_subscriptions')

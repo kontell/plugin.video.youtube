@@ -14,7 +14,7 @@ from atexit import register as atexit_register
 from collections import OrderedDict
 from os.path import exists, isdir
 
-from requests.adapters import HTTPAdapter, Retry
+from requests.adapters import HTTPAdapter as _HTTPAdapter, Retry
 from requests.exceptions import InvalidJSONError, RequestException, URLRequired
 from requests.hooks import default_hooks
 from requests.models import DEFAULT_REDIRECT_LIMIT, Request
@@ -36,6 +36,31 @@ __all__ = (
     'BaseRequestsClass',
     'InvalidJSONError'
 )
+
+
+class HTTPAdapter(_HTTPAdapter):
+    MAX_TOTAL_RETRIES = 3
+
+    def send(self, *args, **kwargs):
+        retry = self.max_retries
+        num_retries = self.MAX_TOTAL_RETRIES
+        if kwargs.pop('_allow_redirects', True):
+            if retry.total is None:
+                retry.total = num_retries
+                retry.connect = None
+                retry.read = None
+                retry.redirect = None
+                retry.status = None
+                retry.other = None
+        else:
+            if retry.total:
+                retry.total = None
+                retry.connect = num_retries
+                retry.read = num_retries
+                retry.redirect = 0
+                retry.status = 0
+                retry.other = 0
+        return super(HTTPAdapter, self).send(*args, **kwargs)
 
 
 class SSLHTTPAdapter(HTTPAdapter):
@@ -148,13 +173,20 @@ class CustomSession(Session):
             pool_maxsize=20,
             pool_block=True,
             max_retries=Retry(
-                total=3,
-                backoff_factor=0.1,
-                status_forcelist={500, 502, 503, 504},
+                total=SSLHTTPAdapter.MAX_TOTAL_RETRIES,
                 allowed_methods=None,
+                status_forcelist={500, 502, 503, 504},
+                backoff_factor=0.1,
+                raise_on_redirect=False,
+                raise_on_status=False,
+                respect_retry_after_header=True,
             )
         ))
         self.mount('http://', HTTPAdapter())
+
+    def send(self, *args, **kwargs):
+        kwargs['_allow_redirects'] = kwargs.get('allow_redirects', True)
+        return super(CustomSession, self).send(*args, **kwargs)
 
 
 class BaseRequestsClass(object):
@@ -276,7 +308,7 @@ class BaseRequestsClass(object):
             return None, None
         with response:
             response.raise_for_status()
-            result = response and response.text
+            result = response.text
         if not result:
             self._raise_exception(
                 kwargs.get('exception', RequestException),
@@ -413,10 +445,13 @@ class BaseRequestsClass(object):
 
         except self._default_exc as exc:
             exc_response = exc.response or response
-            if exc_response:
-                response_text = exc_response.text
-                response_status = exc_response.status_code
-                response_reason = exc_response.reason
+            if exc_response is not None:
+                response_text = (
+                        getattr(exc_response, 'text', None)
+                        or repr(exc_response)
+                )
+                response_status = getattr(exc_response, 'status_code', 'Error')
+                response_reason = getattr(exc_response, 'reason', 'No response')
             else:
                 response_text = None
                 response_status = 'Error'
@@ -447,8 +482,11 @@ class BaseRequestsClass(object):
                     kwargs.update(_detail)
                 if _response is not None:
                     response = _response
-                    if response and not response_text:
-                        response_text = repr(_response)
+                    response_text = (
+                            getattr(response, 'text', None)
+                            or repr(response)
+                            or response_text
+                    )
                 if _exc is not None:
                     raise_exc = _exc
 

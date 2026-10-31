@@ -436,7 +436,7 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
     settings = context.get_settings()
     ui = context.get_ui()
 
-    is_external = ui.get_property(PLAY_USING)
+    is_external = ui.get_property(PLAY_USING, as_bool=True)
     is_strm = params.get(PLAY_STRM)
     mime_type = None
 
@@ -500,7 +500,8 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
                 props['inputstream.adaptive.manifest_config'] = dumps({
                     'timeshift_bufferlimit': 4 * 60 * 60,
                 })
-            if ui.pop_property(PLAY_TIMESHIFT) and 'timeshift' in capabilities:
+            if (ui.pop_property(PLAY_TIMESHIFT, as_bool=True)
+                    and 'timeshift' in capabilities):
                 props['inputstream.adaptive.play_timeshift_buffer'] = True
 
         if not settings.verify_ssl() and 'config_prop' in capabilities:
@@ -549,6 +550,11 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
         art['thumb'] = image
     if show_fanart:
         art['fanart'] = media_item.get_fanart()
+    chapters = media_item.chapters
+    if chapters:
+        for idx, chapter in enumerate(chapters, 1):
+            if chapter['thumbnail']:
+                art['chapter{0}'.format(idx)] = chapter['thumbnail']
     list_item.setArt(art)
 
     if media_item.subtitles:
@@ -556,6 +562,32 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
 
     resume = params.get('resume')
     set_info(list_item, media_item, props, resume=resume)
+
+    if chapters:
+        starts = [chapter['start'] for chapter in chapters]
+        ends = starts[1:] + [max(media_item.get_duration(), starts[-1])]
+        list_item.getVideoInfoTag().setChapters([
+            (start, end, chapter['title'])
+            for start, end, chapter in zip(starts, ends, chapters)
+        ])
+
+    previews = media_item.scrub_previews
+    if previews:
+        # the sharpest level that still fits a TV's preview, else the coarsest
+        level = max(
+            (level for level in previews if level['width'] <= 320),
+            key=lambda level: level['width'],
+            default=previews[0],
+        )
+        list_item.getVideoInfoTag().setScrubPreviews(
+            level['interval'],
+            level['width'],
+            level['height'],
+            level['columns'],
+            level['rows'],
+            level['tiles'],
+            level['count'],
+        )
 
     return list_item
 

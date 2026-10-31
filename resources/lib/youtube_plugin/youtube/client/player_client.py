@@ -897,7 +897,7 @@ class YouTubePlayerClient(YouTubeDataClient):
                 'video_id:      {video_id!r}',
                 'Client:        {client_name!r}',
                 'Auth:          {has_auth!r}',
-                'Valid visitor: {has_visitor_data}',
+                'Visitor:       {visitor_data!v}',
             )
             return None, info, None, data, exception
 
@@ -907,7 +907,7 @@ class YouTubePlayerClient(YouTubeDataClient):
             'video_id:      {video_id!r}',
             'Client:        {client_name!r}',
             'Auth:          {has_auth!r}',
-            'Valid visitor: {has_visitor_data}',
+            'Visitor:       {visitor_data!v}',
         )
         details = json_data['error']
         details = {
@@ -1020,6 +1020,7 @@ class YouTubePlayerClient(YouTubeDataClient):
             error_hook=self._player_error_hook,
             client_name=client_name,
             has_auth=False,
+            visitor_data=client.get('_visitor_data'),
             cache=False,
         )
         if not result:
@@ -1095,7 +1096,7 @@ class YouTubePlayerClient(YouTubeDataClient):
             video_id=self.video_id,
             client_name=client_name,
             has_auth=client.get('_has_auth'),
-            has_visitor_data=bool(client.get('_visitor_data')),
+            visitor_data=client.get('_visitor_data'),
             cache=False,
         )
         if not result:
@@ -1212,7 +1213,7 @@ class YouTubePlayerClient(YouTubeDataClient):
                 video_id=self.video_id,
                 client_name=client_name,
                 has_auth=client.get('_has_auth'),
-                has_visitor_data=bool(client.get('_visitor_data')),
+                visitor_data=client.get('_visitor_data'),
                 cache=False,
             )
             if not result:
@@ -1563,7 +1564,7 @@ class YouTubePlayerClient(YouTubeDataClient):
                 video_id=video_id,
                 client_name=client_name,
                 has_auth=client.get('_has_auth'),
-                has_visitor_data=bool(client.get('_visitor_data')),
+                visitor_data=client.get('_visitor_data'),
                 cache=False,
                 **client
             )
@@ -1610,6 +1611,46 @@ class YouTubePlayerClient(YouTubeDataClient):
             return result['simpleText']
         return None
 
+    @staticmethod
+    def _storyboard_levels(spec, duration):
+        """YouTube's storyboard spec as levels of scrub previews, coarsest
+        first: thumbnails of width x height, count of them, columns x rows to
+        a tile, the interval between two in ms, and the tile URLs.
+
+        base|w#h#count#cols#rows#interval#name#sigh|... with $L, $N and $M in
+        the base URL for the level, its name and the tile; an interval of 0
+        means the duration shared out over the count."""
+        if not spec or not duration:
+            return []
+        parts = spec.split('|')
+        base = parts[0]
+        levels = []
+        for level, args in enumerate(parts[1:]):
+            fields = args.split('#')
+            if len(fields) != 8:
+                continue
+            try:
+                width, height, count, columns, rows, interval = [
+                    int(field) for field in fields[:6]
+                ]
+            except ValueError:
+                continue
+            if not (width and height and count and columns and rows):
+                continue
+            url = (base.replace('$L', str(level)).replace('$N', fields[6])
+                   + '&sigh=' + fields[7])
+            tiles = -(-count // (columns * rows))
+            levels.append({
+                'width': width,
+                'height': height,
+                'count': count,
+                'columns': columns,
+                'rows': rows,
+                'interval': interval or int(round(duration * 1000.0 / count)),
+                'tiles': [url.replace('$M', str(tile)) for tile in range(tiles)],
+            })
+        return levels
+
     def load_stream_info(self,
                          video_id,
                          ask_for_quality=None,
@@ -1641,15 +1682,21 @@ class YouTubePlayerClient(YouTubeDataClient):
         else:
             self._use_mpd = use_mpd
 
+        logged_in = self.logged_in
         context = self._context
         settings = context.get_settings()
         age_gate_enabled = settings.age_gate()
-        use_remote_history = settings.use_remote_history()
+        use_remote_history = (
+                not incognito
+                and logged_in
+                and settings.use_remote_history()
+        )
 
         _client_name = None
         _client = None
         _has_auth = None
         _result = None
+        storyboard_spec = None
         _video_details = None
         _microformat = None
         _streaming_data = None
@@ -1659,7 +1706,6 @@ class YouTubePlayerClient(YouTubeDataClient):
 
         auth_client = None
         visitor_data = self._visitor_data[visitor_data_key]
-        has_visitor_data = bool(visitor_data)
         video_details = {}
         microformat = {}
         responses = {}
@@ -1669,7 +1715,6 @@ class YouTubePlayerClient(YouTubeDataClient):
         fail = self.FAILURE_REASONS
         abort = False
 
-        logged_in = self.logged_in
         client_data = {
             'json': {
                 'videoId': video_id,
@@ -1689,7 +1734,6 @@ class YouTubePlayerClient(YouTubeDataClient):
             '_visitor_data': visitor_data,
         }
         if use_remote_history:
-            client_data['_auth_type'] = 'user'
             client_data['_auth_requested'] = True
 
         for name, clients in self._client_groups:
@@ -1700,7 +1744,7 @@ class YouTubePlayerClient(YouTubeDataClient):
             if name == 'ask' and use_mpd and not ask_for_quality:
                 continue
             if name.startswith('auth_enabled|initial_request'):
-                if visitor_data and not logged_in:
+                if not use_remote_history and video_details and visitor_data:
                     continue
                 allow_skip = False
                 client_data['_auth_requested'] = True
@@ -1737,7 +1781,7 @@ class YouTubePlayerClient(YouTubeDataClient):
                         video_id=video_id,
                         client_name=_client_name,
                         has_auth=_has_auth,
-                        has_visitor_data=has_visitor_data,
+                        visitor_data=visitor_data,
                         cache=False,
                         pass_data=True,
                         raise_exc=False,
@@ -1770,7 +1814,6 @@ class YouTubePlayerClient(YouTubeDataClient):
                         if visitor_data:
                             client_data['_visitor_data'] = visitor_data
                             self._visitor_data[visitor_data_key] = visitor_data
-                            has_visitor_data = True
 
                     _video_details = _result.get('videoDetails', {})
                     _microformat = (_result
@@ -1807,13 +1850,13 @@ class YouTubePlayerClient(YouTubeDataClient):
                                           'video_id:      {video_id!r}',
                                           'Client:        {client!r}',
                                           'Auth:          {has_auth!r}',
-                                          'Valid visitor: {has_visitor_data}'),
+                                          'Visitor:       {visitor_data!v}'),
                                          status=_status,
                                          reason=_reason or 'UNKNOWN',
                                          video_id=video_id,
                                          client=_client_name,
                                          has_auth=_has_auth,
-                                         has_visitor_data=has_visitor_data)
+                                         visitor_data=visitor_data)
 
                         fail_reason = _reason.lower()
 
@@ -1864,11 +1907,11 @@ class YouTubePlayerClient(YouTubeDataClient):
                                 'video_id:      {video_id!r}',
                                 'Client:        {client!r}',
                                 'Auth:          {has_auth!r}',
-                                'Valid visitor: {has_visitor_data}'),
+                                'Visitor:       {visitor_data!v}'),
                                video_id=video_id,
                                client=_client_name,
                                has_auth=_has_auth,
-                               has_visitor_data=has_visitor_data)
+                               visitor_data=visitor_data)
 
                 video_details = merge_dicts(
                     _video_details,
@@ -1888,6 +1931,11 @@ class YouTubePlayerClient(YouTubeDataClient):
                         'result': _result,
                     }
                     client_data['_auth_requested'] = False
+
+                if not storyboard_spec:
+                    storyboard_spec = (_result.get('storyboards', {})
+                                       .get('playerStoryboardSpecRenderer', {})
+                                       .get('spec'))
 
                 responses[_client_name] = {
                     'client': _client,
@@ -1939,19 +1987,19 @@ class YouTubePlayerClient(YouTubeDataClient):
             '_partial': True,
         }
         is_live = (
-                video_details.get('isLiveContent')
-                or video_details.get('hasLiveStreamingData')
+                video_details.get('isLive')
+                or microformat.get('liveBroadcastDetails', {}).get('isLiveNow')
+                or False
         )
-        if is_live:
-            is_live = video_details.get('isLive', False)
-            live_dvr = video_details.get('isLiveDvrEnabled', False)
-            thumb_suffix = '_live' if is_live else ''
-        else:
-            live_dvr = False
-            thumb_suffix = ''
+        post_live = video_details.get('isPostLiveDvr', False)
+        was_live = not is_live and video_details.get('isLiveContent', False)
+        thumb_suffix = '_live' if is_live else ''
 
         meta_info = {
             'id': video_id,
+            'storyboards': self._storyboard_levels(
+                storyboard_spec, int(video_details.get('lengthSeconds') or 0)
+            ),
             'title': unescape(video_details.get('title', '')
                               .encode('raw_unicode_escape')
                               .decode('raw_unicode_escape')),
@@ -1961,6 +2009,9 @@ class YouTubePlayerClient(YouTubeDataClient):
                 'crawlable': video_details.get('isCrawlable', False),
                 'family_safe': microformat.get('isFamilySafe', False),
                 'live': is_live,
+                'post_live': post_live,
+                'was_live': was_live,
+                'upcoming': video_details.get('isUpcoming', False),
             },
             'channel': {
                 'id': video_details.get('channelId', ''),
@@ -2004,16 +2055,7 @@ class YouTubePlayerClient(YouTubeDataClient):
                 'watchtime_url': '',
             }
 
-        if is_live or live_dvr or ask_for_quality or not use_mpd:
-            self._process_hls(
-                stream_list=stream_list,
-                responses=responses,
-                is_live=is_live,
-                meta_info=meta_info,
-                playback_stats=playback_stats,
-            )
-
-        if not is_live or live_dvr:
+        if not is_live or was_live:
             subtitles = Subtitles(context, video_id, use_mpd=use_mpd)
             default_lang, subs_data = self._process_captions(
                 subtitles=subtitles,
@@ -2038,12 +2080,6 @@ class YouTubePlayerClient(YouTubeDataClient):
 
         # extract adaptive streams and create MPEG-DASH manifest
         if use_mpd and not audio_only:
-            self._process_mpd(
-                stream_list=stream_list,
-                responses=responses,
-                meta_info=meta_info,
-                playback_stats=playback_stats,
-            )
             video_data, audio_data = self._process_adaptive_streams(
                 responses=responses,
                 default_lang_code=(default_lang['default']
@@ -2090,12 +2126,27 @@ class YouTubePlayerClient(YouTubeDataClient):
 
                 stream_list['9999'] = yt_format
 
+        if is_live or post_live or ask_for_quality or not stream_list:
+            self._process_hls(
+                stream_list=stream_list,
+                responses=responses,
+                is_live=is_live or post_live,
+                meta_info=meta_info,
+                playback_stats=playback_stats,
+            )
+            self._process_mpd(
+                stream_list=stream_list,
+                responses=responses,
+                meta_info=meta_info,
+                playback_stats=playback_stats,
+            )
+
         # extract non-adaptive streams
-        if audio_only or ask_for_quality or not use_mpd:
+        if audio_only or ask_for_quality or not stream_list:
             self._process_progressive_streams(
                 stream_list=stream_list,
                 responses=responses,
-                is_live=is_live,
+                is_live=is_live or post_live,
                 use_adaptive=use_mpd,
                 meta_info=meta_info,
                 playback_stats=playback_stats,
