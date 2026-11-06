@@ -12,12 +12,13 @@ from __future__ import absolute_import, division, unicode_literals
 import os
 import re
 import socket
-from collections import deque
+from collections import OrderedDict, deque
 from errno import errorcode
 from functools import partial
 from io import open
 from json import dumps as json_dumps, loads as json_loads
 from select import select
+from threading import Lock
 from textwrap import dedent
 
 from urllib3.exceptions import HTTPError
@@ -43,6 +44,7 @@ from ..constants import (
     TEMP_PATH,
 )
 from ..utils.convert_format import fix_subtitle_stream
+from ..utils.hls import EventPlaylist
 from ..utils.methods import wait
 from ..utils.redact import parse_and_redact_uri
 
@@ -259,6 +261,82 @@ class RequestHandler(BaseHTTPRequestHandler, object):
                                      is_local))
         return ip_allowed, path
 
+    @staticmethod
+    def _manifest_type(path):
+        if path['path'].startswith(PATHS.HLS):
+            return 'application/vnd.apple.mpegurl'
+        return 'application/dash+xml'
+
+    # Headers of the demuxer's own request that are not the client's to pass
+    # on to YouTube: everything else is what the play URL carried after '|'.
+    _HLS_PROXY_DROPPED_HEADERS = frozenset((
+        'accept-encoding',
+        'connection',
+        'host',
+        'icy-metadata',
+        'range',
+    ))
+
+    # The live playlists being served, by YouTube URL: one per rendition
+    # playing, and a few played recently.
+    _hls_playlists = OrderedDict()
+    _hls_playlists_lock = Lock()
+    _HLS_PLAYLISTS_MAX = 8
+
+    @classmethod
+    def _hls_playlist(cls, url):
+        with cls._hls_playlists_lock:
+            playlist = cls._hls_playlists.pop(url, None)
+            if playlist is None:
+                playlist = EventPlaylist()
+            cls._hls_playlists[url] = playlist
+            while len(cls._hls_playlists) > cls._HLS_PLAYLISTS_MAX:
+                cls._hls_playlists.popitem(last=False)
+        return playlist
+
+    def proxy_hls_playlist(self, path):
+        """Fetch a live media playlist for Kodi's FFmpeg demuxer, served as an
+        EVENT playlist so that the demuxer can pause and seek in it."""
+        url = path['params'].get('url', [None])[0]
+        host = urlsplit(url).hostname if url else None
+        if not host or not host.endswith('.googlevideo.com'):
+            self.send_error(400)
+            return
+
+        headers = {
+            name: value
+            for name, value in self.headers.items()
+            if name.lower() not in self._HLS_PROXY_DROPPED_HEADERS
+        }
+        response = self.requests.request(url,
+                                         headers=headers,
+                                         cache=False)
+        if response is None:
+            self.send_error(502)
+            return
+        with response:
+            status = response.status_code
+            if status >= 400:
+                self.log.warning(('HLS playlist proxy failed',
+                                  'Status: {status} {reason}'),
+                                 status=status,
+                                 reason=response.reason)
+                self.send_error(status)
+                return
+            # Not response.text: with no charset in the content type, that
+            # guesses one from the whole body, a second for a 4 MB playlist.
+            text = response.content.decode('utf-8', 'replace')
+            playlist = self._hls_playlist(url)
+            with self._hls_playlists_lock:
+                content = playlist.update(text).encode('utf-8')
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
+        self.send_header('Content-Length', str(len(content)))
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(content)
+
     # noinspection PyPep8Naming
     def do_GET(self):
         allowed, path = self.connection_allowed('GET')
@@ -279,7 +357,10 @@ class RequestHandler(BaseHTTPRequestHandler, object):
             self.end_headers()
             self.wfile.write(client_json.encode('utf-8'))
 
-        elif path['path'].startswith(PATHS.MPD):
+        elif path['path'] == PATHS.HLS_PLAYLIST:
+            self.proxy_hls_playlist(path)
+
+        elif path['path'].startswith((PATHS.MPD, PATHS.HLS)):
             try:
                 file = path['params'].get('file', empty)[0]
                 if file:
@@ -290,7 +371,7 @@ class RequestHandler(BaseHTTPRequestHandler, object):
 
                 file_size = os.path.getsize(file_path)
                 self.send_response(200)
-                self.send_header('Content-Type', 'application/dash+xml')
+                self.send_header('Content-Type', self._manifest_type(path))
                 self.send_header('Content-Length', str(file_size))
                 self.end_headers()
 
@@ -603,7 +684,7 @@ class RequestHandler(BaseHTTPRequestHandler, object):
 
         empty = [None]
 
-        if path['path'].startswith(PATHS.MPD):
+        if path['path'].startswith((PATHS.MPD, PATHS.HLS)):
             try:
                 file = path['params'].get('file', empty)[0]
                 if file:
@@ -614,7 +695,7 @@ class RequestHandler(BaseHTTPRequestHandler, object):
 
                 file_size = os.path.getsize(file_path)
                 self.send_response(200)
-                self.send_header('Content-Type', 'application/dash+xml')
+                self.send_header('Content-Type', self._manifest_type(path))
                 self.send_header('Content-Length', str(file_size))
                 self.end_headers()
             except IOError:

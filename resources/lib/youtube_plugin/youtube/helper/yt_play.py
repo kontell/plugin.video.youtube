@@ -86,7 +86,15 @@ def _play_stream(provider, context):
         elif audio_only is None:
             audio_only = not ask_for_quality and settings.audio_only()
 
-        use_mpd = ((not is_external or settings.alternative_player_mpd())
+        # YouTube's HLS through Kodi's own FFmpeg demuxer, from a master the
+        # add-on trims and serves, so the server has to be up.
+        hls_ffmpeg = bool(not is_external
+                          and not audio_only
+                          and settings.hls_ffmpeg()
+                          and context.ipc_exec(SERVER_WAKEUP, timeout=5))
+
+        use_mpd = (not hls_ffmpeg
+                   and (not is_external or settings.alternative_player_mpd())
                    and settings.use_mpd_videos()
                    and context.ipc_exec(SERVER_WAKEUP, timeout=5))
 
@@ -97,6 +105,7 @@ def _play_stream(provider, context):
                 audio_only=audio_only,
                 incognito=incognito,
                 use_mpd=use_mpd,
+                hls_ffmpeg=hls_ffmpeg,
             )
         except YouTubeException as exc:
             logging.exception('Error')
@@ -127,6 +136,7 @@ def _play_stream(provider, context):
             ask_for_quality=ask_for_quality,
             audio_only=audio_only,
             use_mpd=use_mpd,
+            hls_ffmpeg=hls_ffmpeg,
         )
         if stream is None:
             return False
@@ -337,9 +347,16 @@ def _select_stream(context,
                    stream_data_list,
                    ask_for_quality,
                    audio_only,
-                   use_mpd=True):
+                   use_mpd=True,
+                   hls_ffmpeg=False):
     settings = context.get_settings()
-    if settings.use_isa():
+    if hls_ffmpeg:
+        # The trimmed master is the non-adaptive HLS entry, which sorts above
+        # everything else once the adaptive entries are left out.
+        use_adaptive = False
+        use_live_adaptive = False
+        use_live_mpd = False
+    elif settings.use_isa():
         isa_capabilities = context.inputstream_adaptive_capabilities()
         use_adaptive = bool(isa_capabilities)
         use_live_adaptive = use_adaptive and 'live' in isa_capabilities

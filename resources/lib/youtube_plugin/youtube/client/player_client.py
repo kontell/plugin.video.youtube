@@ -38,6 +38,7 @@ from ...kodion.constants import INCOGNITO, PATHS, TEMP_PATH, VALUE_TO_STR
 from ...kodion.network import get_connect_address
 from ...kodion.utils.datetime import fromtimestamp
 from ...kodion.utils.file_system import make_dirs
+from ...kodion.utils.hls import filter_master
 from ...kodion.utils.methods import merge_dicts
 
 
@@ -834,6 +835,7 @@ class YouTubePlayerClient(YouTubeDataClient):
         self._ask_for_quality = settings.ask_for_video_quality()
         self._audio_only = settings.audio_only()
         self._use_mpd = settings.use_mpd_videos()
+        self._hls_ffmpeg = settings.hls_ffmpeg()
 
         audio_language, prefer_default = context.get_player_language()
         if audio_language == 'mediadefault':
@@ -1223,10 +1225,19 @@ class YouTubePlayerClient(YouTubeDataClient):
                 if itag in stream_list:
                     continue
 
+                if self._hls_ffmpeg and not self.FORMAT[itag].get('adaptive'):
+                    # The entry Kodi's own demuxer plays: a master trimmed to
+                    # the add-on's settings, served by the add-on.
+                    itag_url = self._write_hls_manifest(result, is_live)
+                    if not itag_url:
+                        continue
+                else:
+                    itag_url = url
+
                 stream_list[itag] = self._get_stream_format(
                     itag=itag,
                     title='',
-                    url=url,
+                    url=itag_url,
                     meta=meta_info,
                     headers=headers,
                     playback_stats=playback_stats,
@@ -1262,6 +1273,57 @@ class YouTubePlayerClient(YouTubeDataClient):
                     yt_format['title'] = 'Live ' + yt_format['title']
 
                 stream_list[itag] = yt_format
+
+    def _write_hls_manifest(self, manifest, is_live):
+        context = self._context
+        settings = context.get_settings()
+        address = get_connect_address(context, as_netloc=True)
+
+        if is_live:
+            # Live media playlists go through the add-on, which serves them
+            # as EVENT playlists: without that FFmpeg cannot seek in them.
+            def rewrite_uri(uri):
+                return urlunsplit((
+                    'http',
+                    address,
+                    PATHS.HLS_PLAYLIST,
+                    urlencode({'url': uri}),
+                    '',
+                ))
+        else:
+            rewrite_uri = None
+
+        language = self._language_base
+        output = filter_master(
+            manifest,
+            max_height=settings.max_video_height(),
+            stream_features=settings.stream_features(),
+            languages=(language,) if language else (),
+            default_language=language or None,
+            rewrite_uri=rewrite_uri,
+        )
+        if not output:
+            self.log.warning('No HLS variant matches the quality settings')
+            return None
+
+        filename = '.'.join((self.video_id, 'm3u8'))
+        filepath = os_path.join(self.BASE_PATH, filename)
+        try:
+            with xbmcvfs.File(filepath, 'w') as manifest_file:
+                success = manifest_file.write(output)
+        except (IOError, OSError):
+            self.log.exception(('File write failed', 'File: %s'), filepath)
+            success = False
+        if not success:
+            return None
+
+        return urlunsplit((
+            'http',
+            address,
+            PATHS.HLS,
+            urlencode({'file': filename}),
+            '',
+        ))
 
     def _process_progressive_streams(self,
                                      stream_list,
@@ -1616,7 +1678,8 @@ class YouTubePlayerClient(YouTubeDataClient):
                          ask_for_quality=None,
                          audio_only=None,
                          incognito=None,
-                         use_mpd=None):
+                         use_mpd=None,
+                         hls_ffmpeg=None):
         self.video_id = video_id
 
         if ask_for_quality is None:
@@ -1641,6 +1704,9 @@ class YouTubePlayerClient(YouTubeDataClient):
             use_mpd = self._use_mpd
         else:
             self._use_mpd = use_mpd
+
+        if hls_ffmpeg is not None:
+            self._hls_ffmpeg = hls_ffmpeg
 
         logged_in = self.logged_in
         context = self._context

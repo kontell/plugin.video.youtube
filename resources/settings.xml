@@ -17,6 +17,11 @@
                 </setting>
             </group>
             <group id="player_settings">
+                <setting id="kodion.hls.ffmpeg" type="boolean" label="30825" help="30826">
+                    <level>0</level>
+                    <default>false</default>
+                    <control type="toggle"/>
+                </setting>
                 <setting id="kodion.mpd.videos" type="boolean" label="30688" help="30723">
                     <level>0</level>
                     <default>true</default>

@@ -478,6 +478,7 @@ class ServiceMonitor(xbmc.Monitor):
     def httpd_required(self, settings=None, on_idle=False, player=None):
         if settings:
             required = (settings.use_mpd_videos()
+                        or settings.hls_ffmpeg()
                         or settings.api_config_page()
                         or settings.support_alternative_player())
             self._use_httpd = required
@@ -491,7 +492,8 @@ class ServiceMonitor(xbmc.Monitor):
             playing = player.isPlaying() if player else False
             external = player.isExternalPlayer() if playing else False
 
-            required = ((playing and settings.use_mpd_videos())
+            required = ((playing and (settings.use_mpd_videos()
+                                      or settings.hls_ffmpeg()))
                         or settings.api_config_page()
                         or (external and settings.support_alternative_player()))
 

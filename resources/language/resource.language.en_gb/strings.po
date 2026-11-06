@@ -1604,3 +1604,11 @@ msgstr ""
 msgctxt "#30824"
 msgid "Filter by channel names separated by a comma eg. 'The Best Channel,The 2nd Best Channel'"
 msgstr ""
+
+msgctxt "#30825"
+msgid "Play HLS with Kodi's own player (FFmpeg)"
+msgstr ""
+
+msgctxt "#30826"
+msgid "Play videos and live streams from YouTube's HLS manifests through Kodi's built-in FFmpeg demuxer instead of InputStream Adaptive. Needs Kodi 22 or later to pause and skip in live streams. The quality, codec and audio language settings decide which renditions are offered; Kodi plays the best of them and lists the others under Select Program."
+msgstr ""

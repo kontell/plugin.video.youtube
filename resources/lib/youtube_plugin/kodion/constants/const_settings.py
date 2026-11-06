@@ -16,6 +16,7 @@ SETUP_WIZARD_RUNS = 'kodion.setup_wizard.forced_runs'  # (int)
 SETTINGS_END = '|end_settings_marker|'  # (bool)
 
 MPD_VIDEOS = 'kodion.mpd.videos'  # (bool)
+HLS_FFMPEG = 'kodion.hls.ffmpeg'  # (bool)
 MPD_STREAM_SELECT = 'kodion.mpd.stream.select'  # (int)
 MPD_QUALITY_SELECTION = 'kodion.mpd.quality.selection'  # (int)
 MPD_STREAM_FEATURES = 'kodion.mpd.stream.features'  # (list[str])

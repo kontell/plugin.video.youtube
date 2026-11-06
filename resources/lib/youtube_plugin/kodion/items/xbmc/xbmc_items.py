@@ -523,6 +523,14 @@ def playback_item(context, media_item, show_fanart=None, **_kwargs):
         if 'mime=' in uri:
             mime_type = uri.split('mime=', 1)[1].split('&', 1)[0]
             mime_type = mime_type.replace('%2F', '/')
+        elif PATHS.HLS in uri:
+            # A master served by the add-on for Kodi's own FFmpeg demuxer,
+            # which Kodi picks for this mime type with no content lookup.
+            mime_type = 'application/vnd.apple.mpegurl'
+            if media_item.live:
+                # Lets the player slow its clock to keep its buffer at the
+                # live edge, as it does for PVR streams.
+                props['isrealtimestream'] = 'true'
 
         headers = media_item.get_headers(as_string=True)
         if (headers and uri.startswith('http')

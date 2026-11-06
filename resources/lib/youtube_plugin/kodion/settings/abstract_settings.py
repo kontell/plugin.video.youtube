@@ -407,6 +407,11 @@ class AbstractSettings(object):
     def allow_dev_keys(self):
         return self.get_bool(SETTINGS.ALLOW_DEV_KEYS, False)
 
+    def hls_ffmpeg(self, value=None):
+        if value is not None:
+            return self.set_bool(SETTINGS.HLS_FFMPEG, value)
+        return self.get_bool(SETTINGS.HLS_FFMPEG, False)
+
     def use_mpd_videos(self, value=None):
         if self.use_isa():
             if value is not None:
